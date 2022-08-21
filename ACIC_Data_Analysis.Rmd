@@ -1,0 +1,357 @@
+---
+title: "Causal Inference: Final Presentation"
+subtitle: "ACIC Data Analysis"
+author: "Team III"
+institute: 
+  - Department of Statistics
+  - Sungkyunkwan University
+date: "2022 05 22"
+output: 
+  beamer_presentation: 
+    fonttheme: serif
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+# I. Introduction
+
+## American Causal Inference Conference (ACIC)
+
+- Annual gathering of researchers who are interested in drawing causal inferences from experimental and non-experimental data.
+- The oldest and largest meeting for causal inference research and practice since 2004.
+- Since 2016, ACIC has hosted a data challenge in which teams compute to estimate causal impacts in simulated datasets based on real-world data from fields such as health care or education.
+
+## ACIC Competition
+
+- Estimand : Impacts on monthly spending for the average treated patients
+- Data : Simulated data to mirror data from evaluations of large-scale U.S. health care system interventions that aim to lower Medicare expenditures
+- Track 1 : patient-level track
+  - 300,000 patients from 500 practices over 4 years
+  - Approximately 1.2 million patient-year records
+- Track 2 : a practice-level track
+  - the patient-year-level datasets from Track 1 have been averaged up to the practice-year level.
+- Example of practice
+  - small, rural, high-spending practice
+  - large, urban, low-spending practice
+
+## Structure of ACIC Data
+
+- Binary treatment.
+- Continuous Outcome : monthly Medicare expenditures in
+year.
+- Longitudinal data
+  - ranging from Year 1 to Year 4.
+  - Year 1 and 2 : baseline period.
+  - Year 3 and 4 : treated practices receive intervention.
+- Clustered data
+  - patients are clustered within primary care practices.
+  - all patients in treated practice are treated and all patients in untreated practice are untreated.
+- 197 treated and 303 control.
+
+## Variables of ACIC Data 
+
+- `id.practice` : Practice identifier.
+- `Z` : Indicator for whether practice `id.practice` is in the treatment group (`z` = 1) or comparison group (`z` = 0).
+- `year` : Observation year (ranging from 1 to 4).
+- `post` : Indicator for whether the intervention has begun for treated practices. `post` = 1 in Years 3 and 4, `post` = 0 for Years 1 and 2.
+- `Y` : Outcome (monthly Medicare expenditures for patient in `year`).
+- `n.patients` : Number of patients in practice.
+- `X1`, $\ldots$, `X9` and `V1_avg`, \ldots, `V5_C_avg` : potential confounders.
+
+# II. Checking Assumptions
+
+## Types of Confounders
+
+- `X` : Variable that does not vary every year
+  - `X1` ~ `X5` : binary variables
+  - `X6` ~ `X9` : continuous variables 
+- `V` : Continuous variable that varies every year  
+ 
+
+- For `X` variables, we will check overlap assumptions for continuous variables.
+- For `V` variables, we will check overlap assumptions for every year.
+
+
+
+```{r load library}
+# X1 ~ X5 : binary
+# X6 ~ X9, V1 ~ V5 : continuous
+
+# load library
+library(tidyverse)
+library(ggplot2)
+library(cobalt)
+#library(ggcharts)
+```
+
+```{r load data}
+# ---- load data and preprocessing step ----
+practice      <- read_csv("/Users/seong-yeseul/Documents/2022-1/인과추론/track2_20220404/practice/acic_practice_0003.csv")
+practice_year <- read_csv("/Users/seong-yeseul/Documents/2022-1/인과추론/track2_20220404/practice_year/acic_practice_year_0003.csv")
+```
+```{r merge data}
+# merge and change categorical variables to factors
+df <- inner_join(practice_year, practice, "id.practice") %>%
+  dplyr::select(c(1, 3:6, 2, 14:22, 7:13))
+for (i in 6:11) {
+  df[[i]] <- as_factor(df[[i]])
+}
+#df <- as.data.frame(df)
+
+```
+
+```{r}
+preprocess = function(df){
+  df <- df %>% 
+    mutate(X2_A = ifelse(X2 == "A", 1, 0)) %>% 
+    mutate(X2_B = ifelse(X2 == "B", 1, 0)) %>% 
+    mutate(X4_A = ifelse(X4 == "A", 1, 0)) %>% 
+    mutate(X4_B = ifelse(X4 == "B", 1, 0))
+  
+  df <- df[, (c(1, 11:15, 2, 23:24, 4, 25:26, 6:10, 16:22))]
+  df["Tr"] = ifelse(df["Z"] == 1 & df["post"] == 1, 1, 0)
+  y1 = df %>% 
+    filter(year == 1) %>% 
+    dplyr::select(Tr, Y, V1_avg, V2_avg, V3_avg, V4_avg, V5_A_avg, V5_B_avg, V5_C_avg)
+  colnames(y1) = paste("lag", colnames(y1), sep = "")
+  y2 = df %>% 
+    filter(year == 2) %>% 
+    dplyr::select(Tr, Y, V1_avg, V2_avg, V3_avg, V4_avg, V5_A_avg, V5_B_avg, V5_C_avg)
+  colnames(y2) = paste("lag", colnames(y2), sep = "")
+  y3 = df %>% 
+    filter(year == 3) %>% 
+    dplyr::select(Tr, Y, V1_avg, V2_avg, V3_avg, V4_avg, V5_A_avg, V5_B_avg, V5_C_avg)
+  colnames(y3) = paste("lag", colnames(y3), sep = "")
+  df2 = cbind(df %>% filter(year == 2), y1)
+  df3 = cbind(df %>% filter(year == 3), y2)
+  df4 = cbind(df %>% filter(year == 4), y3)
+  df1 = cbind(df %>% filter(year == 1), matrix(0, nrow = 500, ncol = 9))
+  colnames(df1) = c(colnames(df1)[1:25], colnames(y1))
+  df_new = rbind(df1, df2, df3, df4) %>% 
+    arrange(id.practice)
+  return(df_new)
+}
+```
+
+
+
+# V. ATT Estimation 
+
+# IV. Difference in Differences Approach
+## DID in multiple time period
+```{r message=FALSE, warning=FALSE, include=FALSE}
+ps_g = function(df){
+  df["ps"] = rep(0, dim(df)[1])
+  for (i in 1:4){
+    X = df %>% filter(year == i) %>% dplyr::select(Z, starts_with("X"), starts_with("V"))
+    glm1 = glm(Z ~ ., family = "binomial", data = X)
+    df[df["year"] == i, "ps"] = glm1$fitted.values
+  }
+  return(df)
+}
+
+satt = function(df, t, g, yname = "Y", gname = "Z", psname = "ps"){
+  Z = df[df["year"] == g, "Z"]
+  ps_g = df[df["year"] == g, "ps"]
+  Yt = df[df["year"] == t, "Y"]
+  Yg_1 = df[df["year"] == g-1, "Y"]
+  ds = ps_g * (1 - Z) / (1 - ps_g)
+  SATT = (Z / mean(Z) - ds / mean(ds)) * (Yt - Yg_1)
+  return(SATT)
+}
+
+att = function(df, t = 3:4, g = 3, M = 10000){
+  ATT = numeric(M)
+  ATT_t = matrix(0, nrow = M, ncol = length(t)) %>% data.frame()
+  colnames(ATT_t) = paste("ATT(", g, ", ", t, ")", sep = "")
+  for (i in 1:M){
+    df_b = data.frame()
+    for (ii in 1:4){
+      df_b = df_b %>% rbind(df[df["year"] == ii & df["Z"] == 0, ][sample(1:303, 303, replace = T),])
+      df_b = df_b %>% rbind(df[df["year"] == ii & df["Z"] == 1, ][sample(1:197, 197, replace = T),])
+    }
+    df_b = ps_g(df_b)
+    N = 0
+    for (j in 1:length(t)){
+      ATT[i] = ATT[i] + sum(satt(df_b, t[j], g) * df_b[df_b["year"] == t[j], "n.patients"])
+      N = N + sum(df_b[df_b["year"] == t[j], "n.patients"])
+      ATT_t[i, j] = sum(satt(df_b, t[j], g) * df_b[df_b["year"] == t[j], "n.patients"]) / sum(df_b[df_b["year"] == t[j], "n.patients"])
+    }
+    ATT[i] = ATT[i] / N
+    #print(ATT[i,])
+  }
+  CI_L = function(x, alpha = 0.05) sort(x)[round(length(x)*alpha / 2)]
+  CI_U = function(x, alpha = 0.05) sort(x)[round(length(x)*(1 - alpha / 2))]
+
+  out = rbind(apply(ATT_t, 2, mean), apply(ATT_t, 2, sd),  apply(ATT_t, 2, CI_L), apply(ATT_t, 2, CI_U))
+  rownames(out) = c("ATT", "SE", "LB 95% CI", "UB 95% CI")
+  r = list(ATT = data.frame(method = "IPW w DID", att = mean(ATT), sd = sd(ATT)), ATT_t = out)
+  return(r)
+}
+```
+
+- $G_i$ : time period when unit $i$ becomes treated in our data : post $= I(G_i\leqq t)$
+- $C_i$ : indicator variable for whether unit $i$ is in a never-treated
+group in our data : Z $= 1 - C_i$
+- $D_{it}$ : indicator variable for whether unit I has been treated by
+time t in our data : post \* Z = $D_{it}$
+- $Y_{it}$ : unit $i$'s observed outcome in time period t
+- $Y_{it} = I(G_i > t)Y_{it}(0) + I(G_i\leqq t)Y_{it}(G_i)$
+
+## Main Assumptions
+
+- Since $D_{it}$ is whether unit $I$ has been treated in time $t$,
+if $D_{it} = 1 \rightarrow D_{i,t+1} = 1$
+
+- Parallel Trends Assumption based on never-treated units.
+For all $g = 2, .. , T$ with $t\geqq g$,
+$$
+E[Y_t(0) - Y_{t-1}(0) | G = g] = E[Y_t(0) - Y_{t-1}(0) | C = 1]
+$$
+
+- Parallel Trends Assumption based on not-yet treated units\
+For all $g, s = 2, .. , T$ with $t\geqq g$ and $s\geqq t$,
+$$
+E[Y_t(0) - Y_{t-1}(0) | G = g] = E[Y_t(0) - Y_{t-1}(0) | D_s = 0, G\neq g]
+$$
+which means we can use observed outcome of units, which are not-yet
+treated by time $s$ as comparison group of groups first treated in time $g$
+
+-  Not used in our data.
+
+
+
+## Group-Time ATT when $t = g$
+
+- $ATT(g, t) = E[Y_t(g) - Y_t(0) | G = g]$ : in our data, we need $ATT(3, 3)$ and $ATT(3, 4)$
+
+\begin{flalign*}
+AT&T(g, t) \\
+&= E[Y_t(g) | G = g] - E[Y_t(0) | G = g] \\ 
+&= E[Y_t(g) | G = g] - E[Y_{t-1}(0) | G = g] \\ 
+&\qquad- ( E[Y_t(0) | C = 1] - E[Y_{t-1}(0) | C = 1] ) \\ 
+&= E[Y_t | G = g] - E[Y_{t-1} | G = g] \\ 
+&\qquad- ( E[Y_t | C = 1] - E[Y_{t-1} | C = 1] ) \\ 
+&= E[Y_t | G = g] - E[Y_{g-1} | G = g] \\ 
+&\qquad- ( E[Y_t | C = 1] - E[Y_{g-1} | C = 1] ) &&
+\end{flalign*}
+
+## Group-Time ATTwhen $t = g + 1$
+
+\begin{flalign*}
+A&TT(g, t) \\
+&= E[Y_t(g) | G = g] - E[Y_t(0) | G = g] \\
+&= E[Y_t(g) | G = g] - E[Y_{t-1}(0) | G = g] \\
+&\qquad- ( E[Y_t(0) | C = 1] - E[Y_{t-1}(0) | C = 1] ) \\
+&= E[Y_t | G = g] - E[Y_{t-1}(0) | G = g] \\
+&\qquad - ( E[Y_t | C = 1] - E[Y_{t-1} | C = 1] ) \\
+&= E[Y_t | G = g] - E[Y_{t-2}(0) | G = g] \\
+&\qquad - ( E[Y_{t-1} | C = 1] - E[Y_{t-2} | C = 1] ) \\
+&\qquad - ( E[Y_t | C = 1] - E[Y_{t-1} | C = 1] ) \\
+&= E[Y_t | G = g] - E[Y_{t-2}(0) | G = g] \\
+&\qquad - ( E[Y_t | C = 1] - E[Y_{t-2} | C = 1] ) \\
+&= E[Y_t | G = g] - E[Y_{g-1} | G = g] \\
+&\qquad- ( E[Y_t | C = 1] - E[Y_{g-1} | C = 1] ) &&
+\end{flalign*}
+
+## Parallel Trends Conditional on Covariates
+
+- Similarly, $g = 2, .. , T$ with $t \geqq g$
+$ATT(g, t) = E[Y_t - Y_{g-1} | G = g] - E[Y_t - Y_{g-1} | C = 1]$
+- Conditional Parallel Trends Assumption based on never-treated units
+For all $g = 2, .. , T$ with $t \geqq g$,
+$$
+E[Y_t(0) - Y_{t-1}(0) | X, G = g] = E[Y_t(0) - Y_{t-1}(0) | X, C = 1]
+$$
+- In this case, by including covariates in conditioning part, we can also
+obtain
+$$
+ATT(g, t) = E[Y_t - Y_{g-1} | X, G = g] - E[Y_t - Y_{g-1} | X, C = 1]
+$$
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#ATT(3, 3) = E[Y3 - Y2 | X, Z = 1] - E[Y3 - Y2 | X, Z = 0]
+#ATT(3, 4) = E[Y4 - Y2 | X, Z = 1] - E[Y4 - Y2 | X, Z = 0]
+did = function(df, t = 3:4, g = 3, M = 10000, yname = "Y", gname = "Z"){
+  ATT = numeric(M)
+  ATT_t = matrix(0, nrow = M, ncol = length(t)) %>% data.frame()
+  colnames(ATT_t) = paste("ATT(", g, ", ", t, ")", sep = "")
+  for (i in 1:M){
+    df_b = data.frame()
+    for (ii in 1:4){
+      df_b = df_b %>% rbind(df[df["year"] == ii & df["Z"] == 0, ][sample(1:303, 303, replace = T),])
+      df_b = df_b %>% rbind(df[df["year"] == ii & df["Z"] == 1, ][sample(1:197, 197, replace = T),])
+    }
+    Yg_1 = df_b[df_b["year"] == g-1 & df_b["Z"] == 1, "Y"]
+    Yg_0 = df_b[df_b["year"] == g-1 & df_b["Z"] == 0, "Y"]
+    for (j in 1:length(t)){
+      Yt_1 = df_b[df_b["year"] == t[j] & df_b["Z"] == 1, "Y"]
+      N_1 = df_b[df_b["year"] == t[j] & df_b["Z"] == 1, "n.patients"]
+      Yt_0 = df_b[df_b["year"] == t[j] & df_b["Z"] == 0, "Y"]
+      N_0 = df_b[df_b["year"] == t[j] & df_b["Z"] == 0, "n.patients"]
+      ATT_t[i, j] = sum((Yt_1 - Yg_1) * N_1) / sum(N_1) - sum((Yt_0 - Yg_0) * N_0) / sum(N_0)
+    }
+    ATT[i] = sum(ATT_t[i, ] * df_b[df_b["year"] == t,] %>% group_by(year) %>% summarise(n = sum(n.patients)) %>% dplyr::select(n) %>% as.matrix()) / sum(df_b[df_b["year"] == t, "n.patients"])
+  }
+  CI_L = function(x, alpha = 0.05) sort(x)[round(length(x)*alpha / 2)]
+  CI_U = function(x, alpha = 0.05) sort(x)[round(length(x)*(1 - alpha / 2))]
+
+  out = rbind(apply(ATT_t, 2, mean), apply(ATT_t, 2, sd),  apply(ATT_t, 2, CI_L), apply(ATT_t, 2, CI_U))
+  rownames(out) = c("ATT", "SE", "LB 95% CI", "UB 95% CI")
+  r = list(ATT = data.frame(method = "DID", att = mean(ATT), sd = sd(ATT)), ATT_t = out)
+  return(r)
+}
+
+```
+
+
+## DID analysis
+
+```{r echo=FALSE}
+df = inner_join(practice, practice_year, "id.practice")
+df_new = preprocess(df)
+DID = did(df, M = 1000);DID
+#ATT[4, ] <- DID$ATT
+```
+
+## IPW Method with DID setting
+
+- Let $G_g$ to be a binary variable that is equal to 1 if a unit is first treated in period g so that $G_{i, g} = 1$ if $G_i = g$, we can denote the generalized PS as:
+$$
+p_g(X) = P(G_g = 1|X, G_g + C = 1)
+$$
+which is the probability of first treated in period g (in our data, $G_g = 1$ for treated groups)
+
+- or not participating in the treatment in any time period (in our data, $C = 1$ for control groups)
+
+- In our dataset,
+  - $G_i = 3\times I(Z_i = 1)$, $G_{i3} = Z_i$,
+  - $D_{it} = post_i \times Z_i$, $C_i = 1 - Z_i$
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+df_new = ps_g(df_new)
+```
+
+## IPW Method with DID setting
+
+- Group-time average treatment effect using IPW with never-treated group is as below
+$$
+ATT_{ipw}^{nev}(g, t) = E[(\frac{G_g}{E[G_g]} - \frac{\frac{p_g(X)C}{1 - p_g(X)}}{E[\frac{p_g(X)C}{1 - p_g(X)}]})(Y_t - Y_{g-1})]
+$$
+
+- By assuming that assumptions in DID holds, for all g and t that $t \geqq g$,
+$$
+ATT(g, t) = ATT_{ipw}^{nev}(g, t)
+$$
+
+```{r echo=TRUE}
+IPW = att(df_new, t = 3:4, g = 3, M = 1000);IPW
+#ATT[5, ] <- IPW$ATT
+```
+
+
+
+
